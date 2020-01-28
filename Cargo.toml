@@ -1,6 +1,6 @@
 [package]
 name = "humantime-serde"
-version = "0.1.1"
+version = "0.2.0"
 authors = ["jean-airoldie <maxence.caron@protonmail.com>"]
 edition = "2018"
 license = "MIT OR Apache-2.0"
@@ -10,7 +10,7 @@ readme = "README.md"
 keywords = ["serde", "humantime", "time", "duration"]
 
 [dependencies]
-humantime = "1.2"
+humantime = "2.0.0"
 serde = { version = "1.0", features = ["derive"] }
 
 [dev-dependencies]

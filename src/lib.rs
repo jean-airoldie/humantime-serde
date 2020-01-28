@@ -1,4 +1,4 @@
-#![doc(html_root_url = "https://docs.rs/humantime-serde/0.1.0")]
+#![doc(html_root_url = "https://docs.rs/humantime-serde/0.2.0")]
 
 //! Serde support for the `humantime` crate.
 //!
