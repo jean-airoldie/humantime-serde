@@ -35,6 +35,11 @@
 //! }
 //! ```
 
+/// Reexport module.
+pub mod re {
+    pub use humantime;
+}
+
 use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::time::{Duration, SystemTime};
