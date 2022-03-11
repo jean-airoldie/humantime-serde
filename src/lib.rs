@@ -40,6 +40,9 @@ pub mod re {
     pub use humantime;
 }
 
+/// Module for handling `Option`
+pub mod option;
+
 use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::time::{Duration, SystemTime};
