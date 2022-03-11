@@ -40,7 +40,6 @@ pub mod re {
     pub use humantime;
 }
 
-/// Module for handling `Option`
 pub mod option;
 
 use std::fmt;

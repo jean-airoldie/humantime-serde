@@ -1,4 +1,4 @@
-//! Module to adaopt `humantime_serde` to `Option`
+//! Convenience module to allow serialization via `humantime_serde` for `Option`
 //!
 //! # Example
 //!
