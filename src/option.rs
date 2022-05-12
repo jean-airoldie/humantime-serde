@@ -8,6 +8,7 @@
 //!
 //! #[derive(Serialize, Deserialize)]
 //! struct Foo {
+//!     #[serde(default)]
 //!     #[serde(with = "humantime_serde::option")]
 //!     timeout: Option<Duration>,
 //!     #[serde(default)]
