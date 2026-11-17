@@ -5,7 +5,7 @@
 
 # humantime-serde
 
-Serde support for the `humantime` crate.
+Serde support for human-readable durations and timestamps, using the format of the `humantime` crate (`1h 30m`, `2018-01-01T12:53:00Z`). This crate does not depend on `humantime`.
 
 Heavily based on this [fork](https://github.com/tailhook/serde-humantime/tree/serde_wrapper).
 
