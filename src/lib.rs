@@ -1,11 +1,27 @@
-#![doc(html_root_url = "https://docs.rs/humantime-serde/1.0")]
+#![doc(html_root_url = "https://docs.rs/humantime-serde/1.1")]
 #![forbid(unsafe_code)]
 
-//! Serde support for the `humantime` crate.
+//! Serde support for human-readable durations and timestamps, using the
+//! format of the `humantime` crate (`1h 30m`, `2018-01-01T12:53:00Z`).
 //!
 //! Based on [this fork](https://github.com/tailhook/serde-humantime/tree/serde_wrapper).
 //!
 //! Currently `std::time::{Duration, SystemTime}` are supported.
+//!
+//! # Formats
+//!
+//! A `Duration` is written as a list of spans from years down to nanoseconds
+//! (`1h 30m`, `2s 500ms`) and read from any concatenation of
+//! `<number><unit>` spans, where the number may be fractional (`1.5h`).
+//! Units are `nsec`/`ns`, `usec`/`us`/`µs`, `msec`/`ms`, `sec`/`s`,
+//! `min`/`m`, `hours`/`hour`/`hr`/`h`, `days`/`day`/`d`, `weeks`/`week`/`w`,
+//! `months`/`month`/`M` (30.44 days) and `years`/`year`/`yr`/`y`
+//! (365.25 days), plus a few spelling variants.
+//!
+//! A `SystemTime` is written as a UTC RFC 3339 timestamp
+//! (`2018-02-14T00:28:07Z`) and read from the same format, or from the looser
+//! `2018-02-14 00:28:07` where the `T` can be a space and the `Z` is optional.
+//! Only UTC is supported, and only times between 1970 and 9999.
 //!
 //! # Example
 //! ```
@@ -35,10 +51,8 @@
 //! }
 //! ```
 
-/// Reexport module.
-pub mod re {
-    pub use humantime;
-}
+mod duration;
+mod timestamp;
 
 pub mod option;
 
@@ -46,10 +60,9 @@ use std::fmt;
 use std::ops::{Deref, DerefMut};
 use std::time::{Duration, SystemTime};
 
-use humantime;
 use serde::{de, ser, Deserialize, Deserializer, Serialize, Serializer};
 
-/// Deserializes a `Duration` or `SystemTime` via the humantime crate.
+/// Deserializes a `Duration` or `SystemTime` from its human-readable form.
 ///
 /// This function can be used with `serde_derive`'s `with` and
 /// `deserialize_with` annotations.
@@ -61,7 +74,7 @@ where
     Serde::deserialize(d).map(Serde::into_inner)
 }
 
-/// Serializes a `Duration` or `SystemTime` via the humantime crate.
+/// Serializes a `Duration` or `SystemTime` to its human-readable form.
 ///
 /// This function can be used with `serde_derive`'s `with` and
 /// `serialize_with` annotations.
@@ -132,7 +145,7 @@ impl<'de> Deserialize<'de> for Serde<Duration> {
             where
                 E: de::Error,
             {
-                humantime::parse_duration(v).map_err(|_| {
+                duration::parse(v).ok_or_else(|| {
                     E::invalid_value(de::Unexpected::Str(v), &self)
                 })
             }
@@ -160,7 +173,7 @@ impl<'de> Deserialize<'de> for Serde<SystemTime> {
             where
                 E: de::Error,
             {
-                humantime::parse_rfc3339_weak(v).map_err(|_| {
+                timestamp::parse(v).ok_or_else(|| {
                     E::invalid_value(de::Unexpected::Str(v), &self)
                 })
             }
@@ -199,9 +212,7 @@ impl<'a> ser::Serialize for Serde<&'a Duration> {
     where
         S: ser::Serializer,
     {
-        humantime::format_duration(*self.0)
-            .to_string()
-            .serialize(serializer)
+        duration::format(*self.0).serialize(serializer)
     }
 }
 
@@ -210,9 +221,7 @@ impl ser::Serialize for Serde<Duration> {
     where
         S: ser::Serializer,
     {
-        humantime::format_duration(self.0)
-            .to_string()
-            .serialize(serializer)
+        duration::format(self.0).serialize(serializer)
     }
 }
 
@@ -221,9 +230,7 @@ impl<'a> ser::Serialize for Serde<&'a SystemTime> {
     where
         S: ser::Serializer,
     {
-        humantime::format_rfc3339(*self.0)
-            .to_string()
-            .serialize(serializer)
+        serialize_system_time(*self.0, serializer)
     }
 }
 
@@ -232,9 +239,7 @@ impl ser::Serialize for Serde<SystemTime> {
     where
         S: ser::Serializer,
     {
-        humantime::format_rfc3339(self.0)
-            .to_string()
-            .serialize(serializer)
+        serialize_system_time(self.0, serializer)
     }
 }
 
@@ -277,6 +282,21 @@ impl ser::Serialize for Serde<Option<SystemTime>> {
         S: ser::Serializer,
     {
         Serde(&self.0).serialize(serializer)
+    }
+}
+
+fn serialize_system_time<S>(
+    time: SystemTime,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: ser::Serializer,
+{
+    match timestamp::format(time) {
+        Some(formatted) => formatted.serialize(serializer),
+        None => Err(ser::Error::custom(
+            "system time is outside the supported range of 1970 to 9999",
+        )),
     }
 }
 
@@ -363,6 +383,111 @@ mod test {
         let json = r#"{}"#;
         let foo = serde_json::from_str::<Foo>(json).unwrap();
         assert_eq!(foo.time, None);
+    }
+
+    #[test]
+    fn duration_formats_and_units() {
+        #[derive(Serialize, Deserialize)]
+        struct Foo {
+            #[serde(with = "super")]
+            time: Duration,
+        }
+
+        for (input, expected) in &[
+            ("1h 30m", "1h 30m"),
+            ("2s 500ms", "2s 500ms"),
+            ("1hour", "1h"),
+            ("1us", "1us"),
+            ("90 minutes", "1h 30m"),
+            ("1.5h", "1h 30m"),
+            ("0", "0s"),
+            ("1year 1month", "1year 1month"),
+        ] {
+            let json = format!(r#"{{"time":"{}"}}"#, input);
+            let foo = serde_json::from_str::<Foo>(&json).unwrap();
+            let reverse = serde_json::to_string(&foo).unwrap();
+            assert_eq!(reverse, format!(r#"{{"time":"{}"}}"#, expected));
+            let again = serde_json::from_str::<Foo>(&reverse).unwrap();
+            assert_eq!(again.time, foo.time);
+        }
+    }
+
+    #[test]
+    fn invalid_values_are_rejected() {
+        #[derive(Debug, Deserialize)]
+        struct Dur {
+            #[serde(with = "super")]
+            _time: Duration,
+        }
+
+        #[derive(Debug, Deserialize)]
+        struct Time {
+            #[serde(with = "super")]
+            _time: SystemTime,
+        }
+
+        let err = serde_json::from_str::<Dur>(r#"{"_time":"soon"}"#)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("expected a duration"), "{}", err);
+
+        let err = serde_json::from_str::<Time>(r#"{"_time":"soon"}"#)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("expected a timestamp"), "{}", err);
+    }
+
+    #[test]
+    fn unrepresentable_system_time_is_a_serialization_error() {
+        let before_epoch = UNIX_EPOCH - Duration::from_secs(1);
+        let err = serde_json::to_string(&Serde::from(before_epoch))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("supported range"), "{}", err);
+    }
+
+    #[test]
+    fn wrapper_and_collections() {
+        let json = r#"["1h 30m","2s 500ms"]"#;
+        let durations =
+            serde_json::from_str::<Vec<Serde<Duration>>>(json).unwrap();
+        assert_eq!(*durations[0], Duration::from_secs(5400));
+        assert_eq!(*durations[1], Duration::new(2, 500_000_000));
+        assert_eq!(serde_json::to_string(&durations).unwrap(), json);
+
+        let json = r#"["2018-01-01T12:53:00Z","2018-01-01T12:53:00.5Z"]"#;
+        let times =
+            serde_json::from_str::<Vec<Serde<SystemTime>>>(json).unwrap();
+        assert_eq!(
+            serde_json::to_string(&times).unwrap(),
+            r#"["2018-01-01T12:53:00Z","2018-01-01T12:53:00.500000000Z"]"#
+        );
+    }
+
+    #[test]
+    fn option_module() {
+        #[derive(Serialize, Deserialize)]
+        struct Foo {
+            #[serde(with = "crate::option", default)]
+            timeout: Option<Duration>,
+            #[serde(with = "crate::option", default)]
+            time: Option<SystemTime>,
+        }
+
+        let foo = serde_json::from_str::<Foo>(
+            r#"{"timeout":"1m","time":"2018-05-11 18:28:30"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::to_string(&foo).unwrap(),
+            r#"{"timeout":"1m","time":"2018-05-11T18:28:30Z"}"#
+        );
+
+        let foo = serde_json::from_str::<Foo>("{}").unwrap();
+        assert_eq!(
+            serde_json::to_string(&foo).unwrap(),
+            r#"{"timeout":null,"time":null}"#
+        );
     }
 
     #[test]
